@@ -9,7 +9,7 @@ phases:
   build:
     commands:
       - sam build
-      - sam deploy
+      - sam deploy --no-fail-on-empty-changeset
 
 artifacts:
   files:
