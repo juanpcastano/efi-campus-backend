@@ -105,7 +105,7 @@ Resources:
     Properties:
       FunctionName: efi-campus-users-handler
       CodeUri: functions/users-handler/
-      Handler: index.Handler
+      Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
         UsersRoot:
@@ -147,7 +147,7 @@ Resources:
     Properties:
       FunctionName: efi-campus-groups-handler
       CodeUri: functions/groups-handler/
-      Handler: index.Handler
+      Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
         GroupsRoot:
