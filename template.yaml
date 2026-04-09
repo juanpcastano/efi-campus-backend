@@ -31,7 +31,6 @@ Globals:
         REQUIRES_TABLE: efi-campus-requires
 
 Resources:
-
   # ── Roles ──────────────────────────────────────────────────────────────────
 
   LambdaExecutionRole:
@@ -265,4 +264,4 @@ Resources:
 Outputs:
   ApiUrl:
     Description: EFI Campus API URL
-    Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com   Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com
+    Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com

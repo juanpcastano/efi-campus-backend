@@ -2,6 +2,6 @@
   "name": "efi-campus-layer",
   "version": "1.0.0",
   "dependencies": {
-    "aws-lambda-router": "^0.11.0"
+    "itty-router": "^5.0.23"
   }
 }

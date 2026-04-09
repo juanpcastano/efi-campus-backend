@@ -1,8 +1,7 @@
-import { Router } from "aws-lambda-router";
+import { Router, error, json } from "itty-router";
 import {
   DynamoDBClient,
   GetItemCommand,
-  PutItemCommand,
   UpdateItemCommand,
   DeleteItemCommand,
   ScanCommand,
@@ -20,21 +19,44 @@ const cognito = new CognitoIdentityProviderClient({});
 
 const USER_POOL_ID = process.env.USER_POOL_ID;
 const USERS_TABLE = process.env.USERS_TABLE ?? "efi-campus-users";
+const INSCRIPTIONS_TABLE =
+  process.env.INSCRIPTIONS_TABLE ?? "efi-campus-inscriptions";
+const DICTATIONS_TABLE =
+  process.env.DICTATIONS_TABLE ?? "efi-campus-dictations";
+const GROUPS_TABLE = process.env.GROUPS_TABLE ?? "efi-campus-groups";
+const COURSES_TABLE = process.env.COURSES_TABLE ?? "efi-campus-courses";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Lambda adapter ──────────────────────────────────────────────────────────
+// Converts HTTP API v2 event into a standard Request for itty-router,
+// then converts the Response back into the Lambda response format.
 
-const ok = (body, status = 200) => ({
-  statusCode: status,
-  body: JSON.stringify(body),
-});
+const fromEvent = (event) => {
+  const { rawPath, rawQueryString, requestContext, body, headers } = event;
+  const url = `https://lambda${rawPath}${rawQueryString ? `?${rawQueryString}` : ""}`;
+  const method = requestContext.http.method;
+  const request = new Request(url, {
+    method,
+    headers: headers ?? {},
+    body: ["GET", "HEAD"].includes(method) ? undefined : body,
+  });
+  // Attach the full event so handlers can access authorizer claims
+  request.lambdaEvent = event;
+  return request;
+};
 
-const err = (message, status = 400) => ({
-  statusCode: status,
-  body: JSON.stringify({ message }),
-});
+const toResponse = async (response) => {
+  const body = await response.text();
+  return {
+    statusCode: response.status,
+    headers: { "Content-Type": "application/json" },
+    body,
+  };
+};
 
-/** Extracts the sub from the JWT claims injected by API Gateway */
-const getSub = (event) => event.requestContext?.authorizer?.jwt?.claims?.sub;
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const getSub = (request) =>
+  request.lambdaEvent?.requestContext?.authorizer?.jwt?.claims?.sub;
 
 const getUser = async (id) => {
   const res = await dynamo.send(
@@ -43,181 +65,38 @@ const getUser = async (id) => {
   return res.Item ? unmarshall(res.Item) : null;
 };
 
-/** Fetches the caller's user record and checks if role === "admin" */
-const isAdmin = async (event) => {
-  const sub = getSub(event);
+const isAdmin = async (request) => {
+  const sub = getSub(request);
   if (!sub) return false;
   const user = await getUser(sub);
   return user?.role === "admin";
 };
 
-// ─── Router ─────────────────────────────────────────────────────────────────
+const parseBody = (body) =>
+  typeof body === "string" ? JSON.parse(body) : (body ?? {});
 
-const router = new Router();
-
-// ── GET /users ───────────────────────────────────────────────────────────────
-router.get("/users", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-
-  const { role, search } = event.queryStringParameters ?? {};
-
-  // Full scan — pagination can be added later
-  const params = { TableName: USERS_TABLE };
-
-  const filterExpressions = [];
-  const expressionAttributeNames = {};
-  const expressionAttributeValues = {};
-
-  if (role) {
-    filterExpressions.push("#role = :role");
-    expressionAttributeNames["#role"] = "role";
-    expressionAttributeValues[":role"] = { S: role };
-  }
-
-  if (search) {
-    const s = search.toLowerCase();
-    filterExpressions.push(
-      "(contains(#fn, :search) OR contains(#ln, :search) OR contains(#email, :search))",
-    );
-    expressionAttributeNames["#fn"] = "firstName";
-    expressionAttributeNames["#ln"] = "lastName";
-    expressionAttributeNames["#email"] = "email";
-    expressionAttributeValues[":search"] = { S: s };
-  }
-
-  if (filterExpressions.length) {
-    params.FilterExpression = filterExpressions.join(" AND ");
-    params.ExpressionAttributeNames = expressionAttributeNames;
-    params.ExpressionAttributeValues = expressionAttributeValues;
-  }
-
-  const res = await dynamo.send(new ScanCommand(params));
-  return ok({ users: (res.Items ?? []).map(unmarshall) });
-});
-
-// ── GET /users/me ────────────────────────────────────────────────────────────
-router.get("/users/me", async (event) => {
-  const sub = getSub(event);
-  const user = await getUser(sub);
-  if (!user) return err("User not found", 404);
-  return ok({ user });
-});
-
-// ── PATCH /users/me ──────────────────────────────────────────────────────────
-router.patch("/users/me", async (event) => {
-  const sub = getSub(event);
-  return updateUser(sub, event.body);
-});
-
-// ── DELETE /users/me ─────────────────────────────────────────────────────────
-router.delete("/users/me", async (event) => {
-  const sub = getSub(event);
-  return deleteUser(sub, event);
-});
-
-// ── GET /users/me/inscriptions ───────────────────────────────────────────────
-router.get("/users/me/inscriptions", async (event) => {
-  const sub = getSub(event);
-  return getUserInscriptions(sub);
-});
-
-// ── GET /users/me/dictations ─────────────────────────────────────────────────
-router.get("/users/me/dictations", async (event) => {
-  const sub = getSub(event);
-  return getUserDictations(sub);
-});
-
-// ── GET /users/{id} ──────────────────────────────────────────────────────────
-router.get("/users/{id}", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-  const { id } = event.pathParameters;
-  const user = await getUser(id);
-  if (!user) return err("User not found", 404);
-  return ok({ user });
-});
-
-// ── PATCH /users/{id} ────────────────────────────────────────────────────────
-router.patch("/users/{id}", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-  const { id } = event.pathParameters;
-  return updateUser(id, event.body);
-});
-
-// ── DELETE /users/{id} ───────────────────────────────────────────────────────
-router.delete("/users/{id}", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-  const { id } = event.pathParameters;
-  return deleteUser(id, event);
-});
-
-// ── PATCH /users/{id}/role ───────────────────────────────────────────────────
-router.patch("/users/{id}/role", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-
-  const { id } = event.pathParameters;
-  const body =
-    typeof event.body === "string" ? JSON.parse(event.body) : event.body;
-  const { role } = body ?? {};
-
-  if (!["admin", "student"].includes(role)) {
-    return err("role must be 'admin' or 'student'");
-  }
-
-  const user = await getUser(id);
-  if (!user) return err("User not found", 404);
-
-  // Update DynamoDB
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: USERS_TABLE,
-      Key: marshall({ id }),
-      UpdateExpression: "SET #role = :role",
-      ExpressionAttributeNames: { "#role": "role" },
-      ExpressionAttributeValues: marshall({ ":role": role }),
-    }),
-  );
-
-  // Update Cognito custom attribute
-  await cognito.send(
-    new AdminUpdateUserAttributesCommand({
-      UserPoolId: USER_POOL_ID,
-      Username: id,
-      UserAttributes: [{ Name: "custom:role", Value: role }],
-    }),
-  );
-
-  return ok({ message: "Role updated" });
-});
-
-// ── GET /users/{id}/inscriptions ─────────────────────────────────────────────
-router.get("/users/{id}/inscriptions", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-  const { id } = event.pathParameters;
-  return getUserInscriptions(id);
-});
-
-// ── GET /users/{id}/dictations ───────────────────────────────────────────────
-router.get("/users/{id}/dictations", async (event) => {
-  if (!(await isAdmin(event))) return err("Forbidden", 403);
-  const { id } = event.pathParameters;
-  return getUserDictations(id);
-});
-
-// ─── Shared logic ────────────────────────────────────────────────────────────
+// ─── Shared logic ─────────────────────────────────────────────────────────────
 
 async function updateUser(id, rawBody) {
   const user = await getUser(id);
-  if (!user) return err("User not found", 404);
+  if (!user) return error(404, "User not found");
 
-  const body = typeof rawBody === "string" ? JSON.parse(rawBody) : rawBody;
-  const allowed = ["firstName", "lastName", "number", "profilePictureUrl"];
+  const body = parseBody(rawBody);
+  const allowed = [
+    "first_name",
+    "last_name",
+    "phone_number",
+    "profile_picture_url",
+  ];
   const updates = Object.fromEntries(
-    Object.entries(body ?? {}).filter(([k]) => allowed.includes(k)),
+    Object.entries(body).filter(([k]) => allowed.includes(k)),
   );
 
   if (!Object.keys(updates).length) {
-    return err("No valid fields to update");
+    return error(400, "No valid fields to update");
   }
+
+  updates.updated_at = new Date().toISOString();
 
   const setExpressions = [];
   const expressionAttributeNames = {};
@@ -239,37 +118,51 @@ async function updateUser(id, rawBody) {
     }),
   );
 
-  return ok({ message: "User updated" });
+  const cognitoFieldMap = {
+    first_name: "given_name",
+    last_name: "family_name",
+    phone_number: "phone_number",
+  };
+
+  const cognitoAttributes = Object.entries(cognitoFieldMap)
+    .filter(([k]) => updates[k] !== undefined)
+    .map(([k, cognitoName]) => ({
+      Name: cognitoName,
+      Value: String(updates[k]),
+    }));
+
+  if (cognitoAttributes.length) {
+    await cognito.send(
+      new AdminUpdateUserAttributesCommand({
+        UserPoolId: USER_POOL_ID,
+        Username: id,
+        UserAttributes: cognitoAttributes,
+      }),
+    );
+  }
+
+  return json({ message: "User updated" });
 }
 
-async function deleteUser(id, event) {
+async function deleteUser(id) {
   const user = await getUser(id);
-  if (!user) return err("User not found", 404);
+  if (!user) return error(404, "User not found");
 
-  // Delete from DynamoDB
   await dynamo.send(
-    new DeleteItemCommand({
-      TableName: USERS_TABLE,
-      Key: marshall({ id }),
-    }),
+    new DeleteItemCommand({ TableName: USERS_TABLE, Key: marshall({ id }) }),
   );
 
-  // Delete from Cognito
   await cognito.send(
-    new AdminDeleteUserCommand({
-      UserPoolId: USER_POOL_ID,
-      Username: id,
-    }),
+    new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: id }),
   );
 
-  return ok({ message: "User deleted" });
+  return json({ message: "User deleted" });
 }
 
 async function getUserInscriptions(userId) {
-  // Query inscriptions by user_id (GSI required: user_id-index)
   const inscRes = await dynamo.send(
     new QueryCommand({
-      TableName: "efi-campus-inscriptions",
+      TableName: INSCRIPTIONS_TABLE,
       IndexName: "user_id-index",
       KeyConditionExpression: "user_id = :uid",
       ExpressionAttributeValues: marshall({ ":uid": userId }),
@@ -277,14 +170,13 @@ async function getUserInscriptions(userId) {
   );
 
   const inscriptions = (inscRes.Items ?? []).map(unmarshall);
-  if (!inscriptions.length) return ok({ inscriptions: [] });
+  if (!inscriptions.length) return json({ inscriptions: [] });
 
-  // Fetch each group + its course in parallel
   const enriched = await Promise.all(
     inscriptions.map(async (insc) => {
       const groupRes = await dynamo.send(
         new GetItemCommand({
-          TableName: "efi-campus-groups",
+          TableName: GROUPS_TABLE,
           Key: marshall({ id: insc.group_id }),
         }),
       );
@@ -294,7 +186,7 @@ async function getUserInscriptions(userId) {
       if (group?.course_id) {
         const courseRes = await dynamo.send(
           new GetItemCommand({
-            TableName: "efi-campus-courses",
+            TableName: COURSES_TABLE,
             Key: marshall({ id: group.course_id }),
           }),
         );
@@ -305,14 +197,13 @@ async function getUserInscriptions(userId) {
     }),
   );
 
-  return ok({ inscriptions: enriched });
+  return json({ inscriptions: enriched });
 }
 
 async function getUserDictations(userId) {
-  // Query dictations by user_id (GSI required: user_id-index)
   const dictRes = await dynamo.send(
     new QueryCommand({
-      TableName: "efi-campus-dictations",
+      TableName: DICTATIONS_TABLE,
       IndexName: "user_id-index",
       KeyConditionExpression: "user_id = :uid",
       ExpressionAttributeValues: marshall({ ":uid": userId }),
@@ -320,13 +211,13 @@ async function getUserDictations(userId) {
   );
 
   const dictations = (dictRes.Items ?? []).map(unmarshall);
-  if (!dictations.length) return ok({ dictations: [] });
+  if (!dictations.length) return json({ dictations: [] });
 
   const enriched = await Promise.all(
     dictations.map(async (dict) => {
       const groupRes = await dynamo.send(
         new GetItemCommand({
-          TableName: "efi-campus-groups",
+          TableName: GROUPS_TABLE,
           Key: marshall({ id: dict.group_id }),
         }),
       );
@@ -336,7 +227,7 @@ async function getUserDictations(userId) {
       if (group?.course_id) {
         const courseRes = await dynamo.send(
           new GetItemCommand({
-            TableName: "efi-campus-courses",
+            TableName: COURSES_TABLE,
             Key: marshall({ id: group.course_id }),
           }),
         );
@@ -347,7 +238,141 @@ async function getUserDictations(userId) {
     }),
   );
 
-  return ok({ dictations: enriched });
+  return json({ dictations: enriched });
 }
 
-export const handler = router.handler();
+// ─── Router ───────────────────────────────────────────────────────────────────
+
+const router = Router();
+
+// GET /users
+router.get("/users", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+
+  const { role, search } = request.query ?? {};
+  const params = { TableName: USERS_TABLE };
+  const filterExpressions = [];
+  const expressionAttributeNames = {};
+  const expressionAttributeValues = {};
+
+  if (role) {
+    filterExpressions.push("#role = :role");
+    expressionAttributeNames["#role"] = "role";
+    expressionAttributeValues[":role"] = { S: role };
+  }
+
+  if (search) {
+    filterExpressions.push(
+      "(contains(#fn, :search) OR contains(#ln, :search) OR contains(#email, :search))",
+    );
+    expressionAttributeNames["#fn"] = "firstName";
+    expressionAttributeNames["#ln"] = "lastName";
+    expressionAttributeNames["#email"] = "email";
+    expressionAttributeValues[":search"] = { S: search.toLowerCase() };
+  }
+
+  if (filterExpressions.length) {
+    params.FilterExpression = filterExpressions.join(" AND ");
+    params.ExpressionAttributeNames = expressionAttributeNames;
+    params.ExpressionAttributeValues = expressionAttributeValues;
+  }
+
+  const res = await dynamo.send(new ScanCommand(params));
+  return json({ users: (res.Items ?? []).map(unmarshall) });
+});
+
+// GET /users/me/inscriptions
+router.get("/users/me/inscriptions", async (request) => {
+  return getUserInscriptions(getSub(request));
+});
+
+// GET /users/me/dictations
+router.get("/users/me/dictations", async (request) => {
+  return getUserDictations(getSub(request));
+});
+
+// GET /users/me
+router.get("/users/me", async (request) => {
+  const user = await getUser(getSub(request));
+  if (!user) return error(404, "User not found");
+  return json({ user });
+});
+
+// PATCH /users/me
+router.patch("/users/me", async (request) => {
+  const body = await request.json().catch(() => ({}));
+  return updateUser(getSub(request), body);
+});
+
+// DELETE /users/me
+router.delete("/users/me", async (request) => {
+  return deleteUser(getSub(request));
+});
+
+// GET /users/:id/inscriptions
+router.get("/users/:id/inscriptions", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+  return getUserInscriptions(request.params.id);
+});
+
+// GET /users/:id/dictations
+router.get("/users/:id/dictations", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+  return getUserDictations(request.params.id);
+});
+
+// PATCH /users/:id/role
+router.patch("/users/:id/role", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+
+  const { role } = await request.json().catch(() => ({}));
+  if (!["admin", "student"].includes(role)) {
+    return error(400, "role must be 'admin' or 'student'");
+  }
+
+  const user = await getUser(request.params.id);
+  if (!user) return error(404, "User not found");
+
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: USERS_TABLE,
+      Key: marshall({ id: request.params.id }),
+      UpdateExpression: "SET #role = :role",
+      ExpressionAttributeNames: { "#role": "role" },
+      ExpressionAttributeValues: marshall({ ":role": role }),
+    }),
+  );
+
+  return json({ message: "Role updated" });
+});
+
+// GET /users/:id
+router.get("/users/:id", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+  const user = await getUser(request.params.id);
+  if (!user) return error(404, "User not found");
+  return json({ user });
+});
+
+// PATCH /users/:id
+router.patch("/users/:id", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+  const body = await request.json().catch(() => ({}));
+  return updateUser(request.params.id, body);
+});
+
+// DELETE /users/:id
+router.delete("/users/:id", async (request) => {
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
+  return deleteUser(request.params.id);
+});
+
+// ─── Lambda handler ───────────────────────────────────────────────────────────
+
+export const handler = async (event) => {
+  const request = fromEvent(event);
+  const response = await router.fetch(request);
+  if (!response)
+    return { statusCode: 404, body: JSON.stringify({ message: "Not found" }) };
+  return toResponse(response);
+};
