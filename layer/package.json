@@ -2,6 +2,7 @@
   "name": "efi-campus-layer",
   "version": "1.0.0",
   "dependencies": {
-    "itty-router": "^5.0.23"
+    "itty-router": "^5.0.23",
+    "router-utils": "file:./router-utils"
   }
 }
