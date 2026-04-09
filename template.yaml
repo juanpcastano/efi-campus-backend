@@ -31,6 +31,9 @@ Globals:
         REQUIRES_TABLE: efi-campus-requires
 
 Resources:
+
+  # ── Roles ──────────────────────────────────────────────────────────────────
+
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -61,6 +64,47 @@ Resources:
                   - dynamodb:BatchWriteItem
                 Resource: !Sub arn:aws:dynamodb:us-east-2:${AWS::AccountId}:table/efi-campus-*
 
+  UsersLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: efi-campus-users-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource: !Sub arn:aws:dynamodb:us-east-2:${AWS::AccountId}:table/efi-campus-*
+        - PolicyName: CognitoUserManagement
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminUpdateUserAttributes
+                  - cognito-idp:AdminDeleteUser
+                Resource: !Sub arn:aws:cognito-idp:us-east-2:${AWS::AccountId}:userpool/us-east-2_atPOLyOsJ
+
+  # ── API ─────────────────────────────────────────────────────────────────────
+
   EfiApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -89,6 +133,8 @@ Resources:
           - DELETE
           - OPTIONS
 
+  # ── Layer ───────────────────────────────────────────────────────────────────
+
   EfiLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -100,13 +146,18 @@ Resources:
       BuildMethod: nodejs22.x
       BuildArchitecture: arm64
 
+  # ── Functions ───────────────────────────────────────────────────────────────
+
   UsersHandler:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: efi-campus-users-handler
       CodeUri: functions/users-handler/
       Handler: index.handler
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt UsersLambdaRole.Arn
+      Environment:
+        Variables:
+          USER_POOL_ID: us-east-2_atPOLyOsJ
       Events:
         UsersRoot:
           Type: HttpApi
@@ -214,4 +265,4 @@ Resources:
 Outputs:
   ApiUrl:
     Description: EFI Campus API URL
-    Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com
+    Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com   Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com
