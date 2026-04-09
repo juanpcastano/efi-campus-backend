@@ -20,8 +20,10 @@ const cognito = new CognitoIdentityProviderClient({});
 
 const USER_POOL_ID = process.env.USER_POOL_ID;
 const USERS_TABLE = process.env.USERS_TABLE ?? "efi-campus-users";
-const INSCRIPTIONS_TABLE = process.env.INSCRIPTIONS_TABLE ?? "efi-campus-inscriptions";
-const DICTATIONS_TABLE = process.env.DICTATIONS_TABLE ?? "efi-campus-dictations";
+const INSCRIPTIONS_TABLE =
+  process.env.INSCRIPTIONS_TABLE ?? "efi-campus-inscriptions";
+const DICTATIONS_TABLE =
+  process.env.DICTATIONS_TABLE ?? "efi-campus-dictations";
 const GROUPS_TABLE = process.env.GROUPS_TABLE ?? "efi-campus-groups";
 const COURSES_TABLE = process.env.COURSES_TABLE ?? "efi-campus-courses";
 
@@ -29,7 +31,7 @@ const COURSES_TABLE = process.env.COURSES_TABLE ?? "efi-campus-courses";
 
 const getUser = async (id) => {
   const res = await dynamo.send(
-    new GetItemCommand({ TableName: USERS_TABLE, Key: marshall({ id }) })
+    new GetItemCommand({ TableName: USERS_TABLE, Key: marshall({ id }) }),
   );
   return res.Item ? unmarshall(res.Item) : null;
 };
@@ -40,13 +42,36 @@ async function updateUser(id, rawBody) {
   const user = await getUser(id);
   if (!user) return error(404, "User not found");
 
-  const body = typeof rawBody === "string" ? JSON.parse(rawBody) : (rawBody ?? {});
-  const allowed = ["first_name", "last_name", "phone_number", "profile_picture_url"];
+  const body =
+    typeof rawBody === "string" ? JSON.parse(rawBody) : (rawBody ?? {});
+  const allowed = [
+    "first_name",
+    "last_name",
+    "phone_number",
+    "profile_picture_url",
+  ];
   const updates = Object.fromEntries(
-    Object.entries(body).filter(([k]) => allowed.includes(k))
+    Object.entries(body).filter(([k]) => allowed.includes(k)),
   );
 
-  if (!Object.keys(updates).length) return error(400, "No valid fields to update");
+  if (!Object.keys(updates).length)
+    return error(400, "No valid fields to update");
+
+  // Validar unicidad de phone_number
+  if (updates.phone_number !== undefined) {
+    const existing = await dynamo.send(
+      new QueryCommand({
+        TableName: USERS_TABLE,
+        IndexName: "phone_number-index",
+        KeyConditionExpression: "phone_number = :phone",
+        ExpressionAttributeValues: marshall({ ":phone": updates.phone_number }),
+      }),
+    );
+    const match = (existing.Items ?? [])
+      .map(unmarshall)
+      .find((u) => u.id !== id);
+    if (match) return error(409, "Phone number already in use");
+  }
 
   updates.updated_at = new Date().toISOString();
 
@@ -67,7 +92,7 @@ async function updateUser(id, rawBody) {
       UpdateExpression: `SET ${setExpressions.join(", ")}`,
       ExpressionAttributeNames: expressionAttributeNames,
       ExpressionAttributeValues: marshall(expressionAttributeValues),
-    })
+    }),
   );
 
   const cognitoFieldMap = {
@@ -78,7 +103,10 @@ async function updateUser(id, rawBody) {
 
   const cognitoAttributes = Object.entries(cognitoFieldMap)
     .filter(([k]) => updates[k] !== undefined)
-    .map(([k, cognitoName]) => ({ Name: cognitoName, Value: String(updates[k]) }));
+    .map(([k, cognitoName]) => ({
+      Name: cognitoName,
+      Value: String(updates[k]),
+    }));
 
   if (cognitoAttributes.length) {
     await cognito.send(
@@ -86,7 +114,7 @@ async function updateUser(id, rawBody) {
         UserPoolId: USER_POOL_ID,
         Username: id,
         UserAttributes: cognitoAttributes,
-      })
+      }),
     );
   }
 
@@ -98,11 +126,11 @@ async function deleteUser(id) {
   if (!user) return error(404, "User not found");
 
   await dynamo.send(
-    new DeleteItemCommand({ TableName: USERS_TABLE, Key: marshall({ id }) })
+    new DeleteItemCommand({ TableName: USERS_TABLE, Key: marshall({ id }) }),
   );
 
   await cognito.send(
-    new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: id })
+    new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: id }),
   );
 
   return json({ message: "User deleted" });
@@ -115,7 +143,7 @@ async function getUserInscriptions(userId) {
       IndexName: "user_id-index",
       KeyConditionExpression: "user_id = :uid",
       ExpressionAttributeValues: marshall({ ":uid": userId }),
-    })
+    }),
   );
 
   const inscriptions = (inscRes.Items ?? []).map(unmarshall);
@@ -124,20 +152,26 @@ async function getUserInscriptions(userId) {
   const enriched = await Promise.all(
     inscriptions.map(async (insc) => {
       const groupRes = await dynamo.send(
-        new GetItemCommand({ TableName: GROUPS_TABLE, Key: marshall({ id: insc.group_id }) })
+        new GetItemCommand({
+          TableName: GROUPS_TABLE,
+          Key: marshall({ id: insc.group_id }),
+        }),
       );
       const group = groupRes.Item ? unmarshall(groupRes.Item) : null;
 
       let course = null;
       if (group?.course_id) {
         const courseRes = await dynamo.send(
-          new GetItemCommand({ TableName: COURSES_TABLE, Key: marshall({ id: group.course_id }) })
+          new GetItemCommand({
+            TableName: COURSES_TABLE,
+            Key: marshall({ id: group.course_id }),
+          }),
         );
         course = courseRes.Item ? unmarshall(courseRes.Item) : null;
       }
 
       return { ...insc, group, course };
-    })
+    }),
   );
 
   return json({ inscriptions: enriched });
@@ -150,7 +184,7 @@ async function getUserDictations(userId) {
       IndexName: "user_id-index",
       KeyConditionExpression: "user_id = :uid",
       ExpressionAttributeValues: marshall({ ":uid": userId }),
-    })
+    }),
   );
 
   const dictations = (dictRes.Items ?? []).map(unmarshall);
@@ -159,20 +193,26 @@ async function getUserDictations(userId) {
   const enriched = await Promise.all(
     dictations.map(async (dict) => {
       const groupRes = await dynamo.send(
-        new GetItemCommand({ TableName: GROUPS_TABLE, Key: marshall({ id: dict.group_id }) })
+        new GetItemCommand({
+          TableName: GROUPS_TABLE,
+          Key: marshall({ id: dict.group_id }),
+        }),
       );
       const group = groupRes.Item ? unmarshall(groupRes.Item) : null;
 
       let course = null;
       if (group?.course_id) {
         const courseRes = await dynamo.send(
-          new GetItemCommand({ TableName: COURSES_TABLE, Key: marshall({ id: group.course_id }) })
+          new GetItemCommand({
+            TableName: COURSES_TABLE,
+            Key: marshall({ id: group.course_id }),
+          }),
         );
         course = courseRes.Item ? unmarshall(courseRes.Item) : null;
       }
 
       return { ...dict, group, course };
-    })
+    }),
   );
 
   return json({ dictations: enriched });
@@ -183,7 +223,7 @@ async function getUserDictations(userId) {
 const router = Router();
 
 router.get("/users", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
 
   const { role, search } = request.query ?? {};
   const params = { TableName: USERS_TABLE };
@@ -199,7 +239,7 @@ router.get("/users", async (request) => {
 
   if (search) {
     filterExpressions.push(
-      "(contains(#fn, :search) OR contains(#ln, :search) OR contains(#email, :search))"
+      "(contains(#fn, :search) OR contains(#ln, :search) OR contains(#email, :search))",
     );
     expressionAttributeNames["#fn"] = "first_name";
     expressionAttributeNames["#ln"] = "last_name";
@@ -241,17 +281,17 @@ router.delete("/users/me", async (request) => {
 });
 
 router.get("/users/:id/inscriptions", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
   return getUserInscriptions(request.params.id);
 });
 
 router.get("/users/:id/dictations", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
   return getUserDictations(request.params.id);
 });
 
 router.patch("/users/:id/role", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
 
   const { role } = await request.json().catch(() => ({}));
   if (!["admin", "student"].includes(role)) {
@@ -268,27 +308,27 @@ router.patch("/users/:id/role", async (request) => {
       UpdateExpression: "SET #role = :role",
       ExpressionAttributeNames: { "#role": "role" },
       ExpressionAttributeValues: marshall({ ":role": role }),
-    })
+    }),
   );
 
   return json({ message: "Role updated" });
 });
 
 router.get("/users/:id", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
   const user = await getUser(request.params.id);
   if (!user) return error(404, "User not found");
   return json({ user });
 });
 
 router.patch("/users/:id", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
   const body = await request.json().catch(() => ({}));
   return updateUser(request.params.id, body);
 });
 
 router.delete("/users/:id", async (request) => {
-  if (!await isAdmin(request)) return error(403, "Forbidden");
+  if (!(await isAdmin(request))) return error(403, "Forbidden");
   return deleteUser(request.params.id);
 });
 
