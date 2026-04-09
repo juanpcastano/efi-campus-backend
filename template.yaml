@@ -108,6 +108,12 @@ Resources:
       Handler: index.Handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
+        UsersRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /users
         UsersProxy:
           Type: HttpApi
           Properties:
@@ -123,6 +129,12 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
+        CoursesRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /courses
         CoursesProxy:
           Type: HttpApi
           Properties:
@@ -138,6 +150,12 @@ Resources:
       Handler: index.Handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
+        GroupsRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /groups
         GroupsProxy:
           Type: HttpApi
           Properties:
@@ -180,6 +198,12 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
+        NotificationsRoot:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /notifications
         NotificationsProxy:
           Type: HttpApi
           Properties:
