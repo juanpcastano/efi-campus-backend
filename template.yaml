@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: EFI Campus Backend
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    Timeout: 10
+    MemorySize: 256
+    Layers:
+      - !Ref EfiLayer
+    Environment:
+      Variables:
+        USERS_TABLE: efi-campus-users
+        COURSES_TABLE: efi-campus-courses
+        GROUPS_TABLE: efi-campus-groups
+        SESSIONS_TABLE: efi-campus-sessions
+        INSCRIPTIONS_TABLE: efi-campus-inscriptions
+        DICTATIONS_TABLE: efi-campus-dictations
+        ATTENDANCE_TABLE: efi-campus-attendance-records
+        STRUCTURES_TABLE: efi-campus-structures
+        SECTIONS_TABLE: efi-campus-sections
+        ITEMS_TABLE: efi-campus-items
+        QUESTIONS_TABLE: efi-campus-questions
+        ANSWERS_TABLE: efi-campus-answers
+        ATTEMPTS_TABLE: efi-campus-attempts
+        VISIBILITY_TABLE: efi-campus-visibility-overrides
+        NOTIFICATIONS_TABLE: efi-campus-notifications
+        REQUIRES_TABLE: efi-campus-requires
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: efi-campus-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBFullAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource: !Sub arn:aws:dynamodb:us-east-2:${AWS::AccountId}:table/efi-campus-*
+
+  EfiApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.us-east-2.amazonaws.com/us-east-2_atPOLyOsJ
+              audience:
+                - 2tlllc6ia4ncv5srnu22fa7qk3
+      CorsConfiguration:
+        AllowOrigins:
+          - https://eficampus.com
+          - http://localhost:5173
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+
+  EfiLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: efi-campus-layer
+      ContentUri: layer/
+      CompatibleRuntimes: [nodejs22.x]
+      CompatibleArchitectures: [arm64]
+    Metadata:
+      BuildMethod: nodejs22.x
+      BuildArchitecture: arm64
+
+  UsersHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: efi-campus-users-handler
+      CodeUri: functions/users-handler/
+      Handler: index.Handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        UsersProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /users/{proxy+}
+
+  CoursesHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: efi-campus-courses-handler
+      CodeUri: functions/courses-handler/
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        CoursesProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /courses/{proxy+}
+
+  GroupsHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: efi-campus-groups-handler
+      CodeUri: functions/groups-handler/
+      Handler: index.Handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        GroupsProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /groups/{proxy+}
+
+  ContentHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: efi-campus-content-handler
+      CodeUri: functions/content-handler/
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        StructuresProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /structures/{proxy+}
+        SectionsProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /sections/{proxy+}
+        ItemsProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /items/{proxy+}
+
+  NotificationsHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: efi-campus-notifications-handler
+      CodeUri: functions/notifications-handler/
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        NotificationsProxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: ANY
+            Path: /notifications/{proxy+}
+
+Outputs:
+  ApiUrl:
+    Description: EFI Campus API URL
+    Value: !Sub https://${EfiApi}.execute-api.us-east-2.amazonaws.com

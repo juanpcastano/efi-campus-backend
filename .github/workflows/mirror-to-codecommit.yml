@@ -1,0 +1,33 @@
+name: Mirror to CodeCommit
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mirror:
+    name: Mirror to CodeCommit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.CODECOMMIT_SSH_PRIVATE_KEY }}" > ~/.ssh/codecommit_mirror
+          chmod 600 ~/.ssh/codecommit_mirror
+          ssh-keyscan -H git-codecommit.${{ secrets.AWS_REGION }}.amazonaws.com >> ~/.ssh/known_hosts
+
+      - name: Configure Git SSH
+        run: |
+          git config --global core.sshCommand "ssh -i ~/.ssh/codecommit_mirror -o StrictHostKeyChecking=no"
+
+      - name: Push to CodeCommit
+        run: |
+          git remote add codecommit ssh://${{ secrets.CODECOMMIT_SSH_KEY_ID }}@git-codecommit.${{ secrets.AWS_REGION }}.amazonaws.com/v1/repos/efi-campus-backend
+          git push codecommit main --force

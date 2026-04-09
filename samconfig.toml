@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "efi-campus-backend"
+region = "us-east-2"
+capabilities = "CAPABILITY_NAMED_IAM"
+resolve_s3 = true
+s3_prefix = "efi-campus-backend"
+confirm_changeset = false
+disable_rollback = true
+
+[default.global.parameters]
+region = "us-east-2"
