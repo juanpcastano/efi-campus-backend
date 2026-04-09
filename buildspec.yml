@@ -1,0 +1,16 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 22
+    commands:
+      - pip install aws-sam-cli
+  build:
+    commands:
+      - sam build
+      - sam deploy
+
+artifacts:
+  files:
+    - "**/*"
