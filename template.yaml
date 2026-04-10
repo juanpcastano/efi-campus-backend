@@ -109,7 +109,6 @@ Resources:
     Properties:
       StageName: $default
       Auth:
-        DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
           CognitoAuthorizer:
             IdentitySource: $request.header.Authorization
@@ -131,6 +130,7 @@ Resources:
           - PATCH
           - DELETE
           - OPTIONS
+        AllowCredentials: true
 
   # ── Layer ───────────────────────────────────────────────────────────────────
 
@@ -146,6 +146,7 @@ Resources:
       BuildArchitecture: arm64
 
   # ── Functions ───────────────────────────────────────────────────────────────
+  # ⚠️ CAMBIO CRÍTICO: Se elimina ANY y se declaran métodos explícitos.
 
   UsersHandler:
     Type: AWS::Serverless::Function
@@ -158,18 +159,62 @@ Resources:
         Variables:
           USER_POOL_ID: us-east-2_atPOLyOsJ
       Events:
-        UsersRoot:
+        UsersGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: GET
             Path: /users
-        UsersProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /users
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /users/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: POST
+            Path: /users/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /users/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /users/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UsersProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /users/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   CoursesHandler:
     Type: AWS::Serverless::Function
@@ -179,18 +224,62 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
-        CoursesRoot:
+        CoursesGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: GET
             Path: /courses
-        CoursesProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /courses
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /courses/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: POST
+            Path: /courses/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /courses/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /courses/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CoursesProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /courses/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   GroupsHandler:
     Type: AWS::Serverless::Function
@@ -200,18 +289,62 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
-        GroupsRoot:
+        GroupsGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: GET
             Path: /groups
-        GroupsProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /groups
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /groups/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: POST
+            Path: /groups/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /groups/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /groups/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        GroupsProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /groups/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   ContentHandler:
     Type: AWS::Serverless::Function
@@ -221,24 +354,126 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
-        StructuresProxy:
+        StructuresProxyGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: GET
             Path: /structures/{proxy+}
-        SectionsProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        StructuresProxyPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /structures/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        StructuresProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /structures/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        StructuresProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /structures/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        StructuresProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /structures/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        SectionsProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /sections/{proxy+}
-        ItemsProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        SectionsProxyPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /sections/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        SectionsProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /sections/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        SectionsProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /sections/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        SectionsProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /sections/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ItemsProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /items/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ItemsProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: POST
+            Path: /items/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ItemsProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /items/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ItemsProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /items/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        ItemsProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /items/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   NotificationsHandler:
     Type: AWS::Serverless::Function
@@ -248,18 +483,62 @@ Resources:
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
-        NotificationsRoot:
+        NotificationsGet:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: GET
             Path: /notifications
-        NotificationsProxy:
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsPost:
           Type: HttpApi
           Properties:
             ApiId: !Ref EfiApi
-            Method: ANY
+            Method: POST
+            Path: /notifications
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsProxyGet:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: GET
             Path: /notifications/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsProxyPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: POST
+            Path: /notifications/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsProxyPut:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PUT
+            Path: /notifications/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsProxyPatch:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: PATCH
+            Path: /notifications/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
+        NotificationsProxyDelete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EfiApi
+            Method: DELETE
+            Path: /notifications/{proxy+}
+            Auth:
+              Authorizer: CognitoAuthorizer
 
 Outputs:
   ApiUrl:
