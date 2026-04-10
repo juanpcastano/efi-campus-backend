@@ -77,6 +77,81 @@ const getDictationByUser = async (groupId, userId) => {
   return items[0] ?? null;
 };
 
+const getInscriptionsByUserAndTerm = async (userId, term) => {
+  const res = await dynamo.send(
+    new QueryCommand({
+      TableName: INSCRIPTIONS_TABLE,
+      IndexName: "user_id-index",
+      KeyConditionExpression: "user_id = :uid",
+      ExpressionAttributeValues: marshall({ ":uid": userId }),
+    }),
+  );
+  const inscriptions = (res.Items ?? []).map(unmarshall);
+
+  // Filter and enrich
+  const enrichedInscriptions = await Promise.all(
+    inscriptions.map(async (insc) => {
+      const group = await getGroup(insc.group_id);
+      return { ...insc, group };
+    }),
+  );
+
+  return enrichedInscriptions.filter(
+    (insc) => insc.group && insc.group.term === term,
+  );
+};
+
+const getDictationsByUserAndTerm = async (userId, term) => {
+  const res = await dynamo.send(
+    new QueryCommand({
+      TableName: DICTATIONS_TABLE,
+      IndexName: "user_id-index",
+      KeyConditionExpression: "user_id = :uid",
+      ExpressionAttributeValues: marshall({ ":uid": userId }),
+    }),
+  );
+  const dictations = (res.Items ?? []).map(unmarshall);
+
+  // Filter and enrich
+  const enrichedDictations = await Promise.all(
+    dictations.map(async (dict) => {
+      const group = await getGroup(dict.group_id);
+      return { ...dict, group };
+    }),
+  );
+
+  return enrichedDictations.filter(
+    (dict) => dict.group && dict.group.term === term,
+  );
+};
+
+const getProfessorsByGroupId = async (groupId) => {
+  const res = await dynamo.send(
+    new QueryCommand({
+      TableName: DICTATIONS_TABLE,
+      IndexName: "group_id-index",
+      KeyConditionExpression: "group_id = :gid",
+      ExpressionAttributeValues: marshall({ ":gid": groupId }),
+    }),
+  );
+  const dictations = (res.Items ?? []).map(unmarshall);
+
+  const professors = await Promise.all(
+    dictations.map(async (dict) => {
+      const user = await getUserById(dict.user_id);
+      return user
+        ? {
+            id: user.id,
+            firstName: user.first_name,
+            lastName: user.last_name,
+            dictationId: dict.id,
+          }
+        : null;
+    }),
+  );
+  return professors.filter((p) => p !== null);
+};
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 const router = Router();
@@ -86,7 +161,16 @@ router.get("/groups", async (request) => {
   if (!(await isAdmin(request))) return error(403, "Forbidden");
 
   const res = await dynamo.send(new ScanCommand({ TableName: GROUPS_TABLE }));
-  return json({ groups: (res.Items ?? []).map(unmarshall) });
+  const groups = (res.Items ?? []).map(unmarshall);
+
+  const enriched = await Promise.all(
+    groups.map(async (group) => {
+      const professors = await getProfessorsByGroupId(group.id);
+      return { ...group, professors };
+    }),
+  );
+
+  return json({ groups: enriched });
 });
 
 // GET /groups/available — grupos del term actual con open = true, join con curso
@@ -108,7 +192,21 @@ router.get("/groups/available", async (request) => {
     }),
   );
 
-  const groups = (res.Items ?? []).map(unmarshall);
+  let groups = (res.Items ?? []).map(unmarshall);
+
+  try {
+    const sub = getSub(request);
+    const userInscriptions = await getInscriptionsByUserAndTerm(sub, currentTerm);
+    const userDictations = await getDictationsByUserAndTerm(sub, currentTerm);
+    
+    const enrolledCourseIds = userInscriptions.map((insc) => insc.group.course_id);
+    const dictatingCourseIds = userDictations.map((dict) => dict.group.course_id);
+    const forbiddenCourseIds = [...enrolledCourseIds, ...dictatingCourseIds];
+
+    groups = groups.filter((g) => !forbiddenCourseIds.includes(g.course_id));
+  } catch (e) {
+    // If not authenticated or error, show all available
+  }
 
   const enriched = await Promise.all(
     groups.map(async (group) => {
@@ -155,22 +253,8 @@ router.get("/groups/:id", async (request) => {
     result.course = courseRes.Item ? unmarshall(courseRes.Item) : null;
   }
 
-  // Join dictante solo si el grupo está cerrado
-  if (!group.open) {
-    const dictRes = await dynamo.send(
-      new QueryCommand({
-        TableName: DICTATIONS_TABLE,
-        IndexName: "group_id-index",
-        KeyConditionExpression: "group_id = :gid",
-        ExpressionAttributeValues: marshall({ ":gid": group.id }),
-      }),
-    );
-    const dictations = (dictRes.Items ?? []).map(unmarshall);
-    if (dictations.length) {
-      const professor = await getUserById(dictations[0].user_id);
-      result.professor = professor;
-    }
-  }
+  // Join dictantes
+  result.professors = await getProfessorsByGroupId(group.id);
 
   return json({ group: result });
 });
@@ -222,7 +306,7 @@ router.patch("/groups/:id", async (request) => {
   if (!group) return error(404, "Group not found");
 
   const body = await request.json().catch(() => ({}));
-  const allowed = ["structure_id", "schedule", "day_of_week"];
+  const allowed = ["structure_id", "schedule", "day_of_week", "term"];
   const updates = Object.fromEntries(
     Object.entries(body).filter(([k]) => allowed.includes(k)),
   );
@@ -325,7 +409,17 @@ router.get("/groups/:id/inscriptions", async (request) => {
   const enriched = await Promise.all(
     inscriptions.map(async (insc) => {
       const user = await getUserById(insc.user_id);
-      return { ...insc, user };
+      return {
+        ...insc,
+        user: user
+          ? {
+              id: user.id,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              profilePictureUrl: user.profile_picture_url,
+            }
+          : null,
+      };
     }),
   );
 
@@ -343,10 +437,19 @@ router.post("/groups/:id/inscriptions", async (request) => {
   const body = await request.json().catch(() => ({}));
   const userId = admin ? (body.user_id ?? sub) : sub;
 
+  const currentTerm = await getCurrentTerm();
+  const userInscriptions = await getInscriptionsByUserAndTerm(userId, currentTerm);
+
+  // Check if user is already in a group for this course in this term
+  const alreadyEnrolledInCourse = userInscriptions.some(
+    (insc) => insc.group.course_id === group.course_id,
+  );
+  if (alreadyEnrolledInCourse)
+    return error(409, "Already inscribed in a group for this course in the current term");
+
   if (!admin) {
     if (!group.open) return error(403, "Group is closed for inscriptions");
 
-    const currentTerm = await getCurrentTerm();
     if (group.term !== currentTerm)
       return error(403, "Group is not in the current term");
 
