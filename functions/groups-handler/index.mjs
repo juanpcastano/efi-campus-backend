@@ -144,6 +144,7 @@ const getProfessorsByGroupId = async (groupId) => {
             id: user.id,
             firstName: user.first_name,
             lastName: user.last_name,
+            phoneNumber: user.phone_number,
             dictationId: dict.id,
           }
         : null;
@@ -415,8 +416,9 @@ router.get("/groups/:id/inscriptions", async (request) => {
           ? {
               id: user.id,
               firstName: user.first_name,
-              lastName: user.last_name,
-              profilePictureUrl: user.profile_picture_url,
+               lastName: user.last_name,
+               phoneNumber: user.phone_number,
+               profilePictureUrl: user.profile_picture_url,
             }
           : null,
       };
@@ -554,7 +556,18 @@ router.get("/groups/:id/dictations", async (request) => {
   const enriched = await Promise.all(
     dictations.map(async (dict) => {
       const user = await getUserById(dict.user_id);
-      return { ...dict, user };
+      return {
+        ...dict,
+        user: user
+          ? {
+              id: user.id,
+              firstName: user.first_name,
+              lastName: user.last_name,
+              phoneNumber: user.phone_number,
+              profilePictureUrl: user.profile_picture_url,
+            }
+          : null,
+      };
     }),
   );
 
